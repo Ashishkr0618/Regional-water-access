@@ -1,11 +1,12 @@
 """
 backend/routes/dashboard.py
-Flask Blueprint for high-level dashboard summaries and metrics.
+Flask Blueprint for high-level dashboard summaries, metrics, and dynamic filtering.
 Aggregates indicators across all surveyed countries and macro-regions.
+Supports optional filtering by region, year, and custom sort indicator.
 """
 
 import os
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 import pandas as pd
 
 dashboard_bp = Blueprint("dashboard_bp", __name__)
@@ -22,16 +23,39 @@ def get_dashboard():
     """
     GET /api/dashboard
     Returns summary statistics, top/bottom regions with full indicators,
-    and regional averages by world area.
+    regional breakdown, all records, and supports optional query params:
+      - region: filter by macro-region (e.g., 'Africa', 'Asia', 'ALL')
+      - year: filter by year (e.g., 2020)
+      - indicator: column name for sorting top/bottom regions
     """
     try:
-        df = _load_df()
+        raw_df = _load_df()
+        df = raw_df.copy()
+
+        # Optional filtering from query parameters
+        req_region = request.args.get("region")
+        if req_region and req_region.upper() != "ALL" and "region" in df.columns:
+            df = df[df["region"].str.lower() == req_region.strip().lower()]
+
+        req_year = request.args.get("year")
+        if req_year and req_year.upper() != "ALL" and "year" in df.columns:
+            try:
+                df = df[df["year"] == int(req_year)]
+            except ValueError:
+                pass
+
+        sort_indicator = request.args.get("indicator", "basic_water_access_pct")
+        if sort_indicator not in df.columns:
+            sort_indicator = "basic_water_access_pct"
 
         total_regions = int(df["country"].nunique()) if "country" in df.columns else int(len(df))
         dataset_records = int(len(df))
 
         def safe_avg(col):
-            return round(float(df[col].mean()), 2) if col in df.columns else 0.0
+            if col in df.columns and len(df) > 0:
+                val = df[col].mean()
+                return round(float(val), 2) if pd.notna(val) else 0.0
+            return 0.0
 
         avg_basic = safe_avg("basic_water_access_pct")
         avg_safely = safe_avg("safely_managed_water_pct")
@@ -46,22 +70,23 @@ def get_dashboard():
         desired_cols = [
             "country", "region", "basic_water_access_pct", "safely_managed_water_pct",
             "urban_water_access_pct", "rural_water_access_pct",
-            "sanitation_access_pct", "hygiene_availability_pct"
+            "sanitation_access_pct", "hygiene_availability_pct",
+            "unimproved_water_pct", "surface_water_pct", "year"
         ]
         available_cols = [c for c in desired_cols if c in df.columns]
 
         top_regions = []
         bottom_regions = []
-        if "basic_water_access_pct" in df.columns:
-            sorted_df = df[available_cols].dropna(subset=["basic_water_access_pct"])
-            sorted_df = sorted_df.sort_values("basic_water_access_pct", ascending=False)
+        if sort_indicator in df.columns and len(df) > 0:
+            sorted_df = df[available_cols].dropna(subset=[sort_indicator])
+            sorted_df = sorted_df.sort_values(sort_indicator, ascending=False)
             top_regions = sorted_df.head(15).to_dict(orient="records")
             bottom_regions = sorted_df.tail(10).to_dict(orient="records")
 
-        # Regional breakdown by continent / world region
+        # Regional breakdown by continent / world region (from raw_df for broad context)
         by_region = []
-        if "region" in df.columns:
-            grouped = df.groupby("region")
+        if "region" in raw_df.columns:
+            grouped = raw_df.groupby("region")
             for reg, grp in grouped:
                 by_region.append({
                     "region": reg,
@@ -73,7 +98,8 @@ def get_dashboard():
                     "avg_urban": round(float(grp["urban_water_access_pct"].mean()), 1) if "urban_water_access_pct" in grp.columns else 0,
                 })
 
-        year_range = [int(df["year"].min()), int(df["year"].max())] if "year" in df.columns else [2020, 2022]
+        year_range = [int(raw_df["year"].min()), int(raw_df["year"].max())] if "year" in raw_df.columns else [2020, 2022]
+        available_years = sorted(list(raw_df["year"].unique())) if "year" in raw_df.columns else [2020]
 
         return jsonify({
             "total_regions": total_regions,
@@ -90,6 +116,9 @@ def get_dashboard():
             "bottom_regions": bottom_regions,
             "regional_breakdown": by_region,
             "year_range": year_range,
+            "available_years": [int(y) for y in available_years],
+            "all_records": df[available_cols].to_dict(orient="records"),
+            "active_indicator": sort_indicator,
         })
 
     except Exception as e:

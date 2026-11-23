@@ -144,3 +144,11 @@
 .animate-pulse-ring {
   animation: pulse-ring 2s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
 }
+
+/* World map geography styling */
+.rsm-geography {
+  outline: none;
+}
+.rsm-geography:focus {
+  outline: none;
+}

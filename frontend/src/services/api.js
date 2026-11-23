@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Axios instance configured for Vite proxy (/api -> http://127.0.0.1:5000)
 const api = axios.create({
-  baseURL: '',
+  baseURL: import.meta.env.VITE_API_URL || '',
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
 });
@@ -21,7 +21,7 @@ api.interceptors.response.use(
 
 export const getHealth = () => api.get('/api/health');
 
-export const getDashboard = () => api.get('/api/dashboard');
+export const getDashboard = (params = {}) => api.get('/api/dashboard', { params });
 
 export const getDataset = () => api.get('/api/dataset');
 
